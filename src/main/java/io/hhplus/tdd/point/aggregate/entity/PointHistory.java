@@ -9,4 +9,15 @@ public record PointHistory(
         TransactionType type,
         long updateMillis
 ) {
+    @Override
+    public String toString() {
+        return String.format(
+                "\n UserHistoryDomain { id = %d, userId = %d, amount = %d, type = %s, updateMillis = %d }",
+                id,
+                userId,
+                amount,
+                type.toString(),
+                updateMillis
+        );
+    }
 }
