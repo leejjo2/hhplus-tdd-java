@@ -35,6 +35,25 @@ public class PointServiceImpl implements PointService {
     @Override
     public UserPoint chargeUserPoint(long userId, long amount) {
 
+        userTaskQueue.enqueueForUser(userId, () -> {
+            // lock 을 얻는 순서가 꼬일 수 있지 않을까?
+            // 시간을 통해 락을 관리?
+            // amount 는 음수, 최대값을 넘어서는 값 불가
+            // userId  도용의 경우 고려
+            UserPoint userPoint = userPointRepository.findById(userId);
+            long updatedPoint = userPoint.point() + amount;
+            System.out.printf(">>> cur <<< %d + %d = %d%n", userPoint.point(), amount, updatedPoint);
+
+            userPointRepository.save(userId, updatedPoint);
+            pointHistoryRepository.save(userId, amount, TransactionType.CHARGE, System.currentTimeMillis());
+        });
+
+        return userPointRepository.findById(userId);
+    }
+
+    @Override
+    public UserPoint chargeUserPointWithoutLock(long userId, long amount) {
+
         userTaskQueue.enqueueForUserWithoutLock(userId, () -> {
 //        userTaskQueue.enqueueForUser(userId, () -> {
             // lock 을 얻는 순서가 꼬일 수 있지 않을까?
@@ -42,7 +61,7 @@ public class PointServiceImpl implements PointService {
             // amount 는 음수, 최대값을 넘어서는 값 불가
             // userId  도용의 경우 고려
             UserPoint userPoint = userPointRepository.findById(userId);
-            long updatedPoint =  userPoint.point() + amount;
+            long updatedPoint = userPoint.point() + amount;
             System.out.printf(">>> cur <<< %d + %d = %d%n", userPoint.point(), amount, updatedPoint);
 
             userPointRepository.save(userId, updatedPoint);
@@ -55,8 +74,8 @@ public class PointServiceImpl implements PointService {
     @Override
     public UserPoint useUserPoint(long userId, long amount) {
 
-        userTaskQueue.enqueueForUserWithoutLock(userId, () -> {
-//        userTaskQueue.enqueueForUser(userId, () -> {
+//        userTaskQueue.enqueueForUserWithoutLock(userId, () -> {
+        userTaskQueue.enqueueForUser(userId, () -> {
             // amount 는 음수, 최대값을 넘어서는 값 불가
             // userId 도용의 경우 고려
             // 잔고보다 많은 값 사용 불가

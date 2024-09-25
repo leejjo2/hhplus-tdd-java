@@ -6,17 +6,6 @@ import java.util.concurrent.locks.ReentrantLock;
 public class TaskExecutor {
 
     // 유저 큐에서 순차적으로 작업 실행
-    //  processQueue 를 여러 스레드에서 실행해 동시성 문제 해결이 안됨
-    public static void processQueueWithoutLock(BlockingQueue<Runnable> queue) {
-        Runnable task;
-        while ((task = queue.poll()) != null) {
-            task.run(); // 작업 실행 하는 중 락 유지
-        }
-    }
-
-
-    // 유저 큐에서 순차적으로 작업 실행
-    //  processQueue 를 여러 스레드에서 실행해 동시성 문제 해결이 안됨
     public static void processQueue(BlockingQueue<Runnable> queue, ReentrantLock lock) {
 
         // 락을 사용해 동시성을 제어
