@@ -14,7 +14,6 @@ public interface PointService {
 
     UserPoint chargeUserPoint(long userId, long amount);
 
-    UserPoint chargeUserPointWithoutLock(long userId, long amount);
 
     UserPoint useUserPoint(long userId, long amount);
 }
