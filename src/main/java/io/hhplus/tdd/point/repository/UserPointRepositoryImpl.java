@@ -12,9 +12,12 @@ public class UserPointRepositoryImpl implements UserPointRepository{
     private final UserPointTable userPointTable;
 
     @Override
-    public UserPoint save(long userId, long amount) {
+    public UserPoint save(UserPoint userPoint) {
         //
-        return this.userPointTable.insertOrUpdate(userId, amount);
+        if (userPoint == null) {
+            throw new IllegalArgumentException("userPoint is null");
+        }
+        return this.userPointTable.insertOrUpdate(userPoint.id(), userPoint.point());
     }
 
     @Override
