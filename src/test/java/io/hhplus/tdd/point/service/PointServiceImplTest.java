@@ -1,103 +1,122 @@
 package io.hhplus.tdd.point.service;
 
-import io.hhplus.tdd.point.aggregate.entity.PointHistory;
 import io.hhplus.tdd.point.aggregate.entity.UserPoint;
+import io.hhplus.tdd.point.aggregate.vo.TransactionType;
+import io.hhplus.tdd.point.repository.PointHistoryRepository;
+import io.hhplus.tdd.point.repository.UserPointRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.List;
-import java.util.concurrent.*;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.*;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
-@SpringBootTest
+@ExtendWith(MockitoExtension.class)
 class PointServiceImplTest {
 
-    @Autowired
-    private PointService pointService;
+    @Mock
+    private UserPointRepository userPointRepository;
+
+    @Mock
+    private PointHistoryRepository pointHistoryRepository;
+
+    @InjectMocks
+    private PointServiceImpl pointService;
 
     @Test
-    @DisplayName("포인트 충전 동시성 테스트 - CompletableFuture 사용")
-    void chargePointWithCompletableFuture() {
-        // Setup
-        long userId = 1L;
-        long chargeAmount = 100;
-        int count = 10;
+    @DisplayName("사용자가 100 포인트 충전 요청 시, 충전 후 1000 포인트를 반환하는지 테스트")
+    void should_Return_1000Points_When_UserWithId1Charges_100Points() {
+        // Given: mock 객체를 사용하여 초기값 설정
+        UserPoint userPoint = mock(UserPoint.class);
+        given(userPointRepository.findById(anyLong())).willReturn(userPoint);
+        given(userPoint.charge(anyLong())).willReturn(new UserPoint(1L, 1000L, System.currentTimeMillis()));
 
-        // CompletableFuture 배열 생성
-        CompletableFuture<Void>[] futures = new CompletableFuture[count];
+        // When: 포인트 충전 메서드 호출
+        UserPoint chargedPoint = pointService.chargeUserPoint(1L, 100L);
 
-        // Action
-        for (int i = 0; i < count; i++) {
-            futures[i] = CompletableFuture.runAsync(() -> {
-                pointService.chargeUserPoint(userId, chargeAmount);
-//                pointService.chargeUserPointWithoutLock(userId, chargeAmount);
-            });
-        }
-
-        // 모든 작업이 완료될 때까지 대기
-        CompletableFuture.allOf(futures).join();
-
-        // 포인트 히스토리 조회 및 출력
-        List<PointHistory> histories = pointService.findPointHistoriesByUserId(userId);
-        System.out.println(">>> PointHistory <<< " + histories.toString());
-
-        // 포인트 조회
-        UserPoint finalUserPoint = pointService.findUserPointByUserId(userId);
-        System.out.println(">>> UserPoint <<< " + finalUserPoint.toString());
-
-        // Assert
-        assertEquals(chargeAmount * count, finalUserPoint.point());
+        // Then: 결과 검증
+        assertAll(
+                () -> assertNotNull(chargedPoint), // 포인트 객체가 null이 아닌지 확인
+                () -> assertEquals(1L, chargedPoint.id()), // 사용자 ID가 1인지 확인
+                () -> assertEquals(1000L, chargedPoint.point()), // 충전 후 포인트가 30,000인지 확인
+                () -> then(userPointRepository).should().findById(1L), // findById 메서드 호출 확인
+                () -> then(userPoint).should().charge(100L), // charge 메서드 호출 확인
+                () -> then(userPointRepository).should(times(1)).save(chargedPoint), // save 메서드 호출 확인
+                () -> then(pointHistoryRepository).should(times(1)).save(1L, 100L, TransactionType.CHARGE, chargedPoint.updateMillis()) // 히스토리 저장 확인
+        );
     }
 
     @Test
-    @DisplayName("포인트 충전 동시성 테스트 - CountDownLatch 사용")
-    void chargePointWithCountDownLatch() throws InterruptedException {
-        // Setup
-        long userId = 1L;
-        long chargeAmount = 100;
-        int count = 10;
+    @DisplayName("유효하지 않은 금액(음수)으로 포인트 충전 시 예외가 발생하는지 테스트")
+    void should_ThrowException_When_ChargingWithInvalidAmount() {
+        // Given: 유효하지 않은 포인트 충전 시도
+        UserPoint userPoint = mock(UserPoint.class);
+        given(userPointRepository.findById(anyLong())).willReturn(userPoint);
+        doThrow(new IllegalArgumentException("The points to be charged must be greater than 0."))
+                .when(userPoint).charge(anyLong());
 
-        // CountDownLatch 초기화 (스레드 수만큼 카운트)
-        CountDownLatch latch = new CountDownLatch(count);
+        // When & Then: 예외가 발생하는지 확인
+        final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () -> pointService.chargeUserPoint(1L, -100L));
 
-        // Action
-        ExecutorService executorService = Executors.newFixedThreadPool(count);
-
-        for (int i = 0; i < count; i++) {
-            executorService.submit(() -> {
-                try {
-                    pointService.chargeUserPoint(userId, chargeAmount);
-//                    pointService.chargeUserPointWithoutLock(userId, chargeAmount);
-                } finally {
-                    // 스레드 작업이 끝날 때마다 latch 카운트 감소
-                    latch.countDown();
-                }
-            });
-        }
-
-        // 모든 스레드가 종료될 때까지 대기
-        latch.await(10, TimeUnit.SECONDS);
-        executorService.shutdown();
-
-        // 포인트 히스토리 조회 및 출력
-        List<PointHistory> histories = pointService.findPointHistoriesByUserId(userId);
-        System.out.println(">>> PointHistory <<< " + histories.toString());
-
-        // 포인트 조회
-        UserPoint finalUserPoint = pointService.findUserPointByUserId(userId);
-        System.out.println(">>> UserPoint <<< " + finalUserPoint.toString());
-
-        // Assert
-        assertEquals(chargeAmount * count, finalUserPoint.point());
+        // Then: 예외 메시지와 메서드 호출 검증
+        assertAll(
+                () -> assertEquals("The points to be charged must be greater than 0.", exception.getMessage()), // 예외 메시지 확인
+                () -> then(userPointRepository).should().findById(1L), // findById 메서드 호출 확인
+                () -> then(userPoint).should(times(1)).charge(-100L), // charge 메서드 호출 확인
+                () -> then(userPointRepository).should(never()).save(any(UserPoint.class)), // save 메서드가 호출되지 않았는지 확인
+                () -> then(pointHistoryRepository).should(never()).save(anyLong(), anyLong(), any(TransactionType.class), anyLong()) // 히스토리 저장 메서드 호출되지 않았는지 확인
+        );
     }
 
+    /**
+     * 사용자가 100 포인트 사용 요청 시, 사용 후 1000 포인트를 반환하는지 테스트
+     */
+    @Test
+    void should_Return_20000Points_When_UserWithId1Uses_10000Points() {
+        // Given: 포인트 사용 설정
+        UserPoint userPoint = mock(UserPoint.class);
+        given(userPointRepository.findById(anyLong())).willReturn(userPoint);
+        given(userPoint.use(anyLong())).willReturn(new UserPoint(1L, 1000L, System.currentTimeMillis()));
+
+        // When: 포인트 사용 메서드 호출
+        UserPoint usedPoint = pointService.useUserPoint(1L, 100L);
+
+        // Then: 결과 검증
+        assertAll(
+                () -> assertNotNull(usedPoint), // 포인트 객체가 null이 아닌지 확인
+                () -> assertEquals(1L, usedPoint.id()), // 사용자 ID가 1인지 확인
+                () -> assertEquals(1000L, usedPoint.point()), // 사용 후 포인트가 20,000인지 확인
+                () -> then(userPointRepository).should().findById(1L), // findById 메서드 호출 확인
+                () -> then(userPoint).should().use(100L), // use 메서드 호출 확인
+                () -> then(userPointRepository).should(times(1)).save(usedPoint), // save 메서드 호출 확인
+                () -> then(pointHistoryRepository).should(times(1)).save(1L, 100L, TransactionType.USE, usedPoint.updateMillis()) // 히스토리 저장 확인
+        );
+    }
 
     @Test
-    @DisplayName("포인트 사용 동시성 테스트")
-    void usePoint() {
-        //
+    @DisplayName("유효하지 않은 금액으로 포인트 사용 시 예외가 발생한다.")
+    void should_ThrowException_When_UsingWithInvalidAmount() {
+        // Given: 유효하지 않은 포인트 사용 시도
+        UserPoint userPoint = mock(UserPoint.class);
+        given(userPointRepository.findById(anyLong())).willReturn(userPoint);
+        doThrow(new IllegalArgumentException("The points to be used must be greater than 0."))
+                .when(userPoint).use(anyLong());
+
+        // When & Then: 예외가 발생하는지 확인
+        final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () -> pointService.useUserPoint(1L, -1000L));
+
+        // Then: 예외 메시지와 메서드 호출 검증
+        assertAll(
+                () -> assertEquals("The points to be used must be greater than 0.", exception.getMessage()), // 예외 메시지 확인
+                () -> then(userPointRepository).should().findById(1L), // findById 메서드 호출 확인
+                () -> then(userPoint).should(times(1)).use(-1000L), // use 메서드 호출 확인
+                () -> then(userPointRepository).should(never()).save(any(UserPoint.class)), // save 메서드가 호출되지 않았는지 확인
+                () -> then(pointHistoryRepository).should(never()).save(anyLong(), anyLong(), any(TransactionType.class), anyLong()) // 히스토리 저장 메서드 호출되지 않았는지 확인
+        );
     }
 }
