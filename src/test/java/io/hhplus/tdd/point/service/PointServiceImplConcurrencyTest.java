@@ -23,11 +23,12 @@ class PointServiceImplConcurrencyTest {
     private PointServiceImpl pointService;
 
     @Test
-    @DisplayName("포인트 충전 동시성 테스트 - CompletableFuture 사용")
-    void charge_point_with_completable_future() {
+    @DisplayName("단일 유저 포인트 충전, 사용 동시성 테스트 - CompletableFuture 사용")
+    void single_user_charge_point_with_completable_future() {
         // Given
         long userId = 1L;
         long chargeAmount = 100L;
+        long useAmount = 50L;
         int count = 10;
         long balance = pointService.findUserPointByUserId(userId).point();
 
@@ -36,8 +37,10 @@ class PointServiceImplConcurrencyTest {
 
         // When
         for (int i = 0; i < count; i++) {
-            futures[i] = CompletableFuture.runAsync(() -> pointService.chargeUserPoint(userId, chargeAmount));
-//            futures[i] = CompletableFuture.runAsync(() -> pointService.chargeUserPointWithoutLock(userId, chargeAmount));
+            futures[i] = CompletableFuture.runAsync(() -> {
+                pointService.chargeUserPoint(userId, chargeAmount);
+                pointService.useUserPoint(userId, useAmount);
+            });
         }
 
         // 모든 작업이 완료될 때까지 대기
@@ -51,8 +54,54 @@ class PointServiceImplConcurrencyTest {
         logger.info("\n>>> UserPoint <<< {}", finalUserPoint.toString());
 
         // Then
-        assertEquals(balance + chargeAmount * count, finalUserPoint.point());
+        assertEquals(balance + chargeAmount * count - useAmount * count, finalUserPoint.point());
     }
+
+
+    @Test
+    @DisplayName("여러 유저 포인트 충전, 사용 동시성 테스트 - CompletableFuture 사용")
+    void multi_users_charge_point_with_completable_future() {
+        // Given
+        long userId = 1L;
+        long chargeAmount = 100L;
+
+        long user2Id = 2L;
+        long chargeAmount2 = 1000L;
+
+        int count = 10;
+        long balance = pointService.findUserPointByUserId(userId).point();
+        long balance2 = pointService.findUserPointByUserId(user2Id).point();
+
+        // CompletableFuture 배열 생성
+        CompletableFuture<Void>[] futures = new CompletableFuture[count];
+
+        // When
+        for (int i = 0; i < count; i++) {
+            futures[i] = CompletableFuture.runAsync(() -> {
+                pointService.chargeUserPoint(userId, chargeAmount);
+                pointService.chargeUserPoint(user2Id, chargeAmount2);
+            });
+        }
+
+        // 모든 작업이 완료될 때까지 대기
+        // 포인트 히스토리 조회 및 출력
+        CompletableFuture.allOf(futures).join();
+
+
+        // 포인트 조회
+        UserPoint finalUserPoint = pointService.findUserPointByUserId(userId);
+        UserPoint finalUser2Point = pointService.findUserPointByUserId(user2Id);
+
+        print_point_history(userId);
+        logger.info("\n>>> UserPoint <<< {}", finalUserPoint.toString());
+        print_point_history(user2Id);
+        logger.info("\n>>> UserPoint <<< {}", finalUser2Point.toString());
+
+        // Then
+        assertEquals(balance + chargeAmount * count, finalUserPoint.point());
+        assertEquals(balance2 + chargeAmount2 * count, finalUser2Point.point());
+    }
+
 
     @Test
     @DisplayName("포인트 충전 동시성 테스트 - CountDownLatch 사용")
