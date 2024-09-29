@@ -133,6 +133,12 @@ class PointServiceImplTest {
         doThrow(new IllegalArgumentException("The points to be used must be greater than 0."))
                 .when(userPoint).use(anyLong());
 
+        // LockService 모킹: 실제 작업을 수행하는 부분을 래핑
+        given(lockService.executeWithLock(eq(1L), any(Supplier.class))).willAnswer(invocation -> {
+            Supplier<?> task = invocation.getArgument(1);
+            return task.get();
+        });
+
         // When & Then: 예외가 발생하는지 확인
         final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () -> pointService.useUserPoint(1L, -1000L));
 
